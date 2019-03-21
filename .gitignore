@@ -50,3 +50,10 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+# Atmel files
+*.cproj
+*.xml
+Debug*
+lcd.c
+lcd.h
