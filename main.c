@@ -1,8 +1,8 @@
 /*
- * GccApplication3.c
+ * URS_projekt
  *
  * Created: 18/03/2019 17:18:29
- * Author : Kristijan
+ * Author : Kristijan, Bruno, Matija
  */ 
 
 #define F_CPU 8000000UL
