@@ -5,17 +5,14 @@
  * Author : Kristijan, Bruno, Matija
  */ 
 
-#define F_CPU 8000000UL				/* Define CPU Frequency e.g. here its Ext. 12MHz */
+#define F_CPU 8000000UL				/* Define CPU Frequency */
 #include <avr/io.h>					/* Include AVR std. library file */
 #include <util/delay.h>				/* Include Delay header file */
-#include <stdbool.h>				/* Include standard boolean library */
 #include <string.h>					/* Include string library */
 #include <stdio.h>					/* Include standard IO library */
 #include <stdlib.h>					/* Include standard library */
 #include <avr/interrupt.h>			/* Include avr interrupt header file */
 #include "USART_RS232_H_file.h"		/* Include USART header file */
-
-#define SREG    _SFR_IO8(0x3F)		/* Mozda maknuti */
 
 #define DEFAULT_BUFFER_SIZE		160
 
@@ -46,13 +43,14 @@
 #define DHT11_PIN 4
 #define TIMEOUT 200
 
+/* Global variables */
 int8_t Response_Status;
 volatile int16_t Counter = 0, pointer = 0;
 char RESPONSE_BUFFER[DEFAULT_BUFFER_SIZE];
-
 uint8_t c = 0;
 
-void Request()				/* Microcontroller send start pulse/request */
+/* Micro controller send start pulse/request */
+void Request()				
 {
 	DDRB |= (1<<DHT11_PIN);
 	PORTB &= ~(1<<DHT11_PIN);	/* set to low pin */
@@ -60,7 +58,8 @@ void Request()				/* Microcontroller send start pulse/request */
 	PORTB |= (1<<DHT11_PIN);	/* set to high pin */
 }
 
-void Response()	{			/* receive response from DHT11 */
+/* receive response from DHT11 */
+void Response()	{			
 	DDRB &= ~ _BV(DHT11_PIN);
 	
 	uint8_t timeo = TIMEOUT;
@@ -73,7 +72,8 @@ void Response()	{			/* receive response from DHT11 */
 	while(PINB & _BV(DHT11_PIN) && timeo--);
 }
 
-uint8_t Receive_data() { /* receive data */
+/* receive data */
+uint8_t Receive_data() { 
 	uint8_t timeo = TIMEOUT;
 	
 	for (int q=0; q<8; q++)	{
@@ -118,6 +118,17 @@ ISR (USART_RXC_vect)
 
 int main(void)
 {
+	/* Varijable za DHT11 */
+	//uint8_t I_RH, I_Temp, D_RH, D_Temp, CheckSum;
+	
+	/* Varijable za YL-69 */
+	int adc_value;
+	float moisture;
+	
+	char _buffer[DEFAULT_BUFFER_SIZE];
+	char _comm[DEFAULT_BUFFER_SIZE];
+	char moisture_s[5];
+	memset(_buffer, 0, DEFAULT_BUFFER_SIZE);
 	
 	ADC_Init();
 
@@ -126,49 +137,76 @@ int main(void)
 	
 	USART_SendString("AT+RST");
 	USART_SendString("\r\n");
-	_delay_ms(10000);						/* Cekaj da se wifi uspostavi, za sad */
+	_delay_ms(1000);
 	
-	char _buffer[DEFAULT_BUFFER_SIZE];
-	char _comm[DEFAULT_BUFFER_SIZE];
-	memset(_buffer, 0, DEFAULT_BUFFER_SIZE);
+	/* Set aplication mode */
 	memset(_comm, 0, DEFAULT_BUFFER_SIZE);
+	sprintf(_comm, "AT+CWMODE=%d", BOTH_STATION_AND_ACCESPOINT);
+	USART_SendString(_comm);
+	USART_SendString("\r\n");
+	_delay_ms(1000);
 	
-	uint8_t I_RH, D_RH, I_Temp, D_Temp, CheckSum; /* Varijable za DHT11 */
+	/* Set application mode */
+	memset(_comm, 0, DEFAULT_BUFFER_SIZE);
+	sprintf(_comm, "AT+CIPMUX=%d", SINGLE);
+	USART_SendString(_comm);
+	USART_SendString("\r\n");
+	_delay_ms(200);
+	
+	/* Set conection mode */
+	memset(_comm, 0, DEFAULT_BUFFER_SIZE);
+	sprintf(_comm, "AT+CIPMODE=%d", NORMAL);
+	USART_SendString(_comm);
+	USART_SendString("\r\n");
+	_delay_ms(200);
+	
+	/* Connect to Wifi */
+	memset(_comm, 0, DEFAULT_BUFFER_SIZE);
+	sprintf(_comm, "AT+CWJAP=\"%s\",\"%s\"", SSID, PASSWORD);
+	USART_SendString(_comm);
+	USART_SendString("\r\n");
+	
+	_delay_ms(10000);						/* Cekaj da se wifi uspostavi, za sad */
 	
 	while(1)
 	{
+		// Get DHT11 data
+		//Request();				// send start pulse
+		//Response();				// receive response
+		//I_RH=Receive_data();	// store first eight bit in I_RH
+		//D_RH=Receive_data();	// store next eight bit in D_RH
+		//I_Temp=Receive_data();	// store next eight bit in I_Temp
+		//D_Temp=Receive_data();	// store next eight bit in D_Temp
+		//CheckSum=Receive_data();// store next eight bit in CheckSum
 		
-		Request();				// send start pulse
-		Response();				// receive response
-		I_RH=Receive_data();	// store first eight bit in I_RH
-		D_RH=Receive_data();	// store next eight bit in D_RH
-		I_Temp=Receive_data();	// store next eight bit in I_Temp
-		D_Temp=Receive_data();	// store next eight bit in D_Temp
-		CheckSum=Receive_data();// store next eight bit in CheckSum
-		
-		int adc_value = ADC_Read();	/* Copy the ADC value */
-		float moisture = 100-(adc_value*100.00)/1023.00; /* Calculate moisture in % */
-		
+		// Get ADC value from YL-69
+		adc_value = ADC_Read();							/* Copy the ADC value */
+		moisture = 100-(adc_value*100.00)/1023.00;	/* Calculate moisture in % */
 		
 		// Send
+		// Spremi upit
 		memset(_buffer, 0, DEFAULT_BUFFER_SIZE);
-		sprintf(_buffer, "GET /update?api_key=H4U6085PT48J0V3S&field1=%d&field2=%d&field3=%d.%d", I_Temp, I_RH, (int)moisture, (int)((moisture-(int)(moisture))*100));
-		//sprintf(_buffer, "GET /update?api_key=H4U6085PT48J0V3S&field1=%d&field2=%d&field3=%d.%d", 1, 2, (int)3.33, (int)((4-(int)(4))*100));
-		//sprintf(_buffer, "GET /update?api_key=H4U6085PT48J0V3S&field1=%d&field2=%d&field3=%.2f", 1, 2, 3.22);
+		memset(moisture_s, 0, 5);
+		dtostrf(moisture, 4, 2, moisture_s);
+		sprintf(_buffer, "GET /update?api_key=%s&field1=%d&field2=%d&field3=%s", API_WRITE_KEY, 1, 2, moisture_s);
 		
-		USART_SendString("AT+CIPSTART=\"TCP\",\"api.thingspeak.com\",80");
+		// Povezi se TCP
+		memset(_comm, 0, DEFAULT_BUFFER_SIZE);
+		sprintf(_comm, "AT+CIPSTART=\"TCP\",\"%s\",%s", DOMAIN, PORT);
+		USART_SendString(_comm);
 		USART_SendString("\r\n");
-		_delay_ms(1000);
+		_delay_ms(200);
 		
+		// Posalji mu velicinu upita
 		memset(_comm, 0, DEFAULT_BUFFER_SIZE);
 		sprintf(_comm, "AT+CIPSEND=%d", (strlen(_buffer)+2));
 		USART_SendString(_comm);
 		USART_SendString("\r\n");
-		_delay_ms(1000);
+		_delay_ms(200);
 
-
+		// Posalji upit
 		USART_SendString(_buffer);
 		USART_SendString("\r\n");
-		_delay_ms(20000);
+		_delay_ms(15000);
 	}
 }
