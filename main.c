@@ -5,61 +5,89 @@
  * Author : Kristijan, Bruno, Matija
  */ 
 
-#define F_CPU 8000000UL
+#define F_CPU 8000000UL				/* Define CPU Frequency e.g. here its Ext. 12MHz */
+#include <avr/io.h>					/* Include AVR std. library file */
+#include <util/delay.h>				/* Include Delay header file */
+#include <stdbool.h>				/* Include standard boolean library */
+#include <string.h>					/* Include string library */
+#include <stdio.h>					/* Include standard IO library */
+#include <stdlib.h>					/* Include standard library */
+#include <avr/interrupt.h>			/* Include avr interrupt header file */
+#include "USART_RS232_H_file.h"		/* Include USART header file */
 
-//#include <stdio.h>
+#define SREG    _SFR_IO8(0x3F)		/* Mozda maknuti */
 
-#include <avr/io.h>
-#include <stdlib.h>
-//#include <string.h>
-#include <util/delay.h>
+#define DEFAULT_BUFFER_SIZE		160
 
-#include "lcd.h"
+/* Connection Mode */
+#define SINGLE					0
+#define MULTIPLE				1
 
-#define DHT11_PIN 7
-#define timeout 200
+/* Application Mode */
+#define NORMAL					0
+#define TRANSPERANT				1
 
-uint8_t c = 0, I_RH, D_RH, I_Temp, D_Temp, CheckSum;
-char data[8];
+/* Application Mode */
+#define STATION							1
+#define ACCESSPOINT						2
+#define BOTH_STATION_AND_ACCESPOINT		3
+
+/* Define Required fields shown below */
+#define DOMAIN				"api.thingspeak.com"
+#define PORT				"80"
+#define API_WRITE_KEY		"H4U6085PT48J0V3S"
+#define CHANNEL_ID			"742903"
+
+/* Define Wireless connection */
+#define SSID				"ISKONOVAC-5527ff"
+#define PASSWORD			"ISKON2802508179"
+
+/* Define DHT11 Pin and TIMEOUT */
+#define DHT11_PIN 4
+#define TIMEOUT 200
+
+int8_t Response_Status;
+volatile int16_t Counter = 0, pointer = 0;
+char RESPONSE_BUFFER[DEFAULT_BUFFER_SIZE];
+
+uint8_t c = 0;
 
 void Request()				/* Microcontroller send start pulse/request */
 {
-	DDRA |= (1<<DHT11_PIN);
-	PORTA &= ~(1<<DHT11_PIN);	/* set to low pin */
+	DDRB |= (1<<DHT11_PIN);
+	PORTB &= ~(1<<DHT11_PIN);	/* set to low pin */
 	_delay_ms(20);			/* wait for 20ms */
-	PORTA |= (1<<DHT11_PIN);	/* set to high pin */
+	PORTB |= (1<<DHT11_PIN);	/* set to high pin */
 }
 
 void Response()	{			/* receive response from DHT11 */
-	DDRA &= ~ _BV(DHT11_PIN);
+	DDRB &= ~ _BV(DHT11_PIN);
 	
-	uint8_t timeo = timeout;
-	while(PINA & _BV(DHT11_PIN) && timeo--);
+	uint8_t timeo = TIMEOUT;
+	while(PINB & _BV(DHT11_PIN) && timeo--);
 	
-	timeo = timeout;
-	while(!(PINA & _BV(DHT11_PIN)) && timeo--);
+	timeo = TIMEOUT;
+	while(!(PINB & _BV(DHT11_PIN)) && timeo--);
 
-	timeo = timeout;
-	while(PINA & _BV(DHT11_PIN) && timeo--);
+	timeo = TIMEOUT;
+	while(PINB & _BV(DHT11_PIN) && timeo--);
 }
 
 uint8_t Receive_data() { /* receive data */
-	uint8_t timeo = timeout;
+	uint8_t timeo = TIMEOUT;
 	
 	for (int q=0; q<8; q++)	{
-		while(((PINA & (1<<DHT11_PIN)) == 0) && timeo--);  /* check received bit 0 or 1 */
+		while(((PINB & (1<<DHT11_PIN)) == 0) && timeo--);  /* check received bit 0 or 1 */
 		_delay_us(30);
-		if(PINA & (1<<DHT11_PIN))/* if high pulse is greater than 30ms */
+		if(PINB & (1<<DHT11_PIN))/* if high pulse is greater than 30ms */
 		c = (c<<1)|(0x01);	/* then its logic HIGH */
 		else			/* otherwise its logic LOW */
 		c = (c<<1);
-		timeo = timeout;
-		while((PINA & (1<<DHT11_PIN)) && timeo--);
+		timeo = TIMEOUT;
+		while((PINB & (1<<DHT11_PIN)) && timeo--);
 	}
 	return c;
 }
-
-//SOIL
 
 void ADC_Init()
 {
@@ -76,73 +104,71 @@ int ADC_Read()
 	return(ADC);		/* return the ADCW */
 }
 
-void lcd_print(uint8_t I_RH, uint8_t I_Temp, float moisture) {
-	lcd_clrscr();
-	
-	lcd_gotoxy(0, 0);
-	lcd_puts("H: ");
-	itoa(I_RH, data, 10);
-	lcd_puts(data);
-	lcd_puts(" %");
-	
-	lcd_gotoxy(9, 0);
-	lcd_puts("T: ");
-	itoa(I_Temp, data, 10);
-	lcd_puts(data);
-	lcd_putc(0xDF);
-	lcd_puts("C");
-	
-	lcd_gotoxy(0, 1);
-	lcd_puts("M: ");
-	dtostrf(moisture,3,2,data);
-	lcd_puts(data);
-	lcd_puts(" %");
+ISR (USART_RXC_vect)
+{
+	uint8_t oldsrg = SREG;
+	cli();
+	RESPONSE_BUFFER[Counter] = UDR;
+	Counter++;
+	if(Counter == DEFAULT_BUFFER_SIZE){
+		Counter = 0; pointer = 0;
+	}
+	SREG = oldsrg;
 }
 
+int main(void)
+{
+	
+	ADC_Init();
 
-int main(void){
+	USART_Init(115200);						/* Initiate USART with 115200 baud rate */
+	sei();									/* Start global interrupt */
 	
-	DDRD = _BV(4);
+	USART_SendString("AT+RST");
+	USART_SendString("\r\n");
+	_delay_ms(10000);						/* Cekaj da se wifi uspostavi, za sad */
+	
+	char _buffer[DEFAULT_BUFFER_SIZE];
+	char _comm[DEFAULT_BUFFER_SIZE];
+	memset(_buffer, 0, DEFAULT_BUFFER_SIZE);
+	memset(_comm, 0, DEFAULT_BUFFER_SIZE);
+	
+	uint8_t I_RH, D_RH, I_Temp, D_Temp, CheckSum; /* Varijable za DHT11 */
+	
+	while(1)
+	{
+		
+		Request();				// send start pulse
+		Response();				// receive response
+		I_RH=Receive_data();	// store first eight bit in I_RH
+		D_RH=Receive_data();	// store next eight bit in D_RH
+		I_Temp=Receive_data();	// store next eight bit in I_Temp
+		D_Temp=Receive_data();	// store next eight bit in D_Temp
+		CheckSum=Receive_data();// store next eight bit in CheckSum
+		
+		int adc_value = ADC_Read();	/* Copy the ADC value */
+		float moisture = 100-(adc_value*100.00)/1023.00; /* Calculate moisture in % */
+		
+		
+		// Send
+		memset(_buffer, 0, DEFAULT_BUFFER_SIZE);
+		sprintf(_buffer, "GET /update?api_key=H4U6085PT48J0V3S&field1=%d&field2=%d&field3=%d.%d", I_Temp, I_RH, (int)moisture, (int)((moisture-(int)(moisture))*100));
+		//sprintf(_buffer, "GET /update?api_key=H4U6085PT48J0V3S&field1=%d&field2=%d&field3=%d.%d", 1, 2, (int)3.33, (int)((4-(int)(4))*100));
+		//sprintf(_buffer, "GET /update?api_key=H4U6085PT48J0V3S&field1=%d&field2=%d&field3=%.2f", 1, 2, 3.22);
+		
+		USART_SendString("AT+CIPSTART=\"TCP\",\"api.thingspeak.com\",80");
+		USART_SendString("\r\n");
+		_delay_ms(1000);
+		
+		memset(_comm, 0, DEFAULT_BUFFER_SIZE);
+		sprintf(_comm, "AT+CIPSEND=%d", (strlen(_buffer)+2));
+		USART_SendString(_comm);
+		USART_SendString("\r\n");
+		_delay_ms(1000);
 
-	TCCR1A = _BV(COM1B1) | _BV(WGM10);
-	TCCR1B = _BV(WGM12) | _BV(CS11);
-	OCR1B = 80;
-	
-	lcd_init(LCD_DISP_ON);			/* Initialize LCD */
 
-	ADC_Init();		/* initialize the ADC */
-	
-	int adc_value;
-	float moisture;
-	
-	while(1) {	
-		
-		Request();				// send start pulse 
-		Response();				// receive response 
-		I_RH=Receive_data();	// store first eight bit in I_RH 
-		D_RH=Receive_data();	// store next eight bit in D_RH 
-		I_Temp=Receive_data();	// store next eight bit in I_Temp 
-		D_Temp=Receive_data();	// store next eight bit in D_Temp 
-		CheckSum=Receive_data();// store next eight bit in CheckSum 
-		
-		adc_value = ADC_Read();	/* Copy the ADC value */
-		moisture = 100-(adc_value*100.00)/1023.00; /* Calculate moisture in % */
-		
-		if ((I_RH + D_RH + I_Temp + D_Temp) != CheckSum) {
-			lcd_clrscr();
-			lcd_gotoxy(0, 0);
-			lcd_puts("Connection error");
-			lcd_gotoxy(0, 1);
-			lcd_puts("M: ");
-			dtostrf(moisture,3,2,data);
-			lcd_puts(data);
-			_delay_ms(500);
-			continue;
-		} else {
-			lcd_print(I_RH, I_Temp, moisture);
-			_delay_ms(500);
-		}
-		
+		USART_SendString(_buffer);
+		USART_SendString("\r\n");
+		_delay_ms(20000);
 	}
-
 }
