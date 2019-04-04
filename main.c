@@ -119,7 +119,7 @@ ISR (USART_RXC_vect)
 int main(void)
 {
 	/* Varijable za DHT11 */
-	//uint8_t I_RH, I_Temp, D_RH, D_Temp, CheckSum;
+	uint8_t I_RH, I_Temp, D_RH, D_Temp, CheckSum;
 	
 	/* Varijable za YL-69 */
 	int adc_value;
@@ -171,24 +171,33 @@ int main(void)
 	while(1)
 	{
 		// Get DHT11 data
-		//Request();				// send start pulse
-		//Response();				// receive response
-		//I_RH=Receive_data();	// store first eight bit in I_RH
-		//D_RH=Receive_data();	// store next eight bit in D_RH
-		//I_Temp=Receive_data();	// store next eight bit in I_Temp
-		//D_Temp=Receive_data();	// store next eight bit in D_Temp
-		//CheckSum=Receive_data();// store next eight bit in CheckSum
+		uint8_t timeo = 5;					/* Probaj 5 put dobiti, ako nece preskoci */
+		do {
+			Request();				// send start pulse
+			Response();				// receive response
+			I_RH=Receive_data();	// store first eight bit in I_RH
+			D_RH=Receive_data();	// store next eight bit in D_RH
+			I_Temp=Receive_data();	// store next eight bit in I_Temp
+			D_Temp=Receive_data();	// store next eight bit in D_Temp
+			CheckSum=Receive_data();// store next eight bit in CheckSum
+		} while ((I_RH + D_RH + I_Temp + D_Temp) != CheckSum && --timeo);
 		
 		// Get ADC value from YL-69
 		adc_value = ADC_Read();							/* Copy the ADC value */
 		moisture = 100-(adc_value*100.00)/1023.00;	/* Calculate moisture in % */
+		
+		// Ako nije spojeno, preskoci
+		if (!timeo || !adc_value) {
+			_delay_ms(15000);
+			continue;
+		}
 		
 		// Send
 		// Spremi upit
 		memset(_buffer, 0, DEFAULT_BUFFER_SIZE);
 		memset(moisture_s, 0, 5);
 		dtostrf(moisture, 4, 2, moisture_s);
-		sprintf(_buffer, "GET /update?api_key=%s&field1=%d&field2=%d&field3=%s", API_WRITE_KEY, 1, 2, moisture_s);
+		sprintf(_buffer, "GET /update?api_key=%s&field1=%d&field2=%d&field3=%s", API_WRITE_KEY, I_Temp, I_RH, moisture_s);
 		
 		// Povezi se TCP
 		memset(_comm, 0, DEFAULT_BUFFER_SIZE);
