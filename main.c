@@ -36,10 +36,10 @@
 #define CHANNEL_ID			"742903"
 
 /* Define Wireless connection */
-#define SSID				"ISKONOVAC-5527ff"
-#define PASSWORD			"ISKON2802508179"
+#define SSID				"FiWi"
+#define PASSWORD			"bananana"
 
-/* Define DHT11 Pin and TIMEOUT */
+/* Define DHT11 Pin and defaut TIMEOUT za DHT11*/
 #define DHT11_PIN 4
 #define TIMEOUT 200
 
@@ -50,8 +50,7 @@ char RESPONSE_BUFFER[DEFAULT_BUFFER_SIZE];
 uint8_t c = 0;
 
 /* Micro controller send start pulse/request */
-void Request()				
-{
+void Request() {
 	DDRB |= (1<<DHT11_PIN);
 	PORTB &= ~(1<<DHT11_PIN);	/* set to low pin */
 	_delay_ms(20);			/* wait for 20ms */
@@ -89,14 +88,12 @@ uint8_t Receive_data() {
 	return c;
 }
 
-void ADC_Init()
-{
+void ADC_Init() {
 	DDRA=0x0;		/*  Make ADC port as input  */
 	ADCSRA = 0x87;		/*  Enable ADC, fr/128  */
 }
 
-int ADC_Read()
-{
+int ADC_Read() {
 	ADMUX = 0x40;		/* Vref: Avcc, ADC channel: 0  */
 	ADCSRA |= (1<<ADSC);	/* start conversion  */
 	while ((ADCSRA &(1<<ADIF))==0);	/* monitor end of conversion interrupt flag */
@@ -104,8 +101,7 @@ int ADC_Read()
 	return(ADC);		/* return the ADCW */
 }
 
-ISR (USART_RXC_vect)
-{
+ISR (USART_RXC_vect) {
 	uint8_t oldsrg = SREG;
 	cli();
 	RESPONSE_BUFFER[Counter] = UDR;
@@ -116,8 +112,7 @@ ISR (USART_RXC_vect)
 	SREG = oldsrg;
 }
 
-int main(void)
-{
+int main(void) {
 	/* Varijable za DHT11 */
 	uint8_t I_RH, I_Temp, D_RH, D_Temp, CheckSum;
 	
@@ -135,6 +130,7 @@ int main(void)
 	USART_Init(115200);						/* Initiate USART with 115200 baud rate */
 	sei();									/* Start global interrupt */
 	
+	/* Reset ESP8266 */
 	USART_SendString("AT+RST");
 	USART_SendString("\r\n");
 	_delay_ms(1000);
@@ -166,12 +162,11 @@ int main(void)
 	USART_SendString(_comm);
 	USART_SendString("\r\n");
 	
-	_delay_ms(10000);						/* Cekaj da se wifi uspostavi, za sad */
+	_delay_ms(10000);						/* Wait for connection to establish */
 	
-	while(1)
-	{
+	while(1) {
 		// Get DHT11 data
-		uint8_t timeo = 5;					/* Probaj 5 put dobiti, ako nece preskoci */
+		uint8_t timeo = 5;					/* Try to read 5 times */
 		do {
 			Request();				// send start pulse
 			Response();				// receive response
@@ -186,36 +181,36 @@ int main(void)
 		adc_value = ADC_Read();							/* Copy the ADC value */
 		moisture = 100-(adc_value*100.00)/1023.00;	/* Calculate moisture in % */
 		
-		// Ako nije spojeno, preskoci
+		// If the values are valid, continue
 		if (!timeo || !adc_value) {
-			_delay_ms(15000);
+			_delay_ms(100); // wait for a bit
 			continue;
 		}
 		
-		// Send
-		// Spremi upit
+		// Send buffer to Thingspeak
+		// Save GET query
 		memset(_buffer, 0, DEFAULT_BUFFER_SIZE);
 		memset(moisture_s, 0, 5);
 		dtostrf(moisture, 4, 2, moisture_s);
 		sprintf(_buffer, "GET /update?api_key=%s&field1=%d&field2=%d&field3=%s", API_WRITE_KEY, I_Temp, I_RH, moisture_s);
 		
-		// Povezi se TCP
+		// Connect to Thingspeak
 		memset(_comm, 0, DEFAULT_BUFFER_SIZE);
 		sprintf(_comm, "AT+CIPSTART=\"TCP\",\"%s\",%s", DOMAIN, PORT);
 		USART_SendString(_comm);
 		USART_SendString("\r\n");
 		_delay_ms(200);
 		
-		// Posalji mu velicinu upita
+		// Send size of bufeer
 		memset(_comm, 0, DEFAULT_BUFFER_SIZE);
 		sprintf(_comm, "AT+CIPSEND=%d", (strlen(_buffer)+2));
 		USART_SendString(_comm);
 		USART_SendString("\r\n");
 		_delay_ms(200);
 
-		// Posalji upit
+		// Send request
 		USART_SendString(_buffer);
 		USART_SendString("\r\n");
-		_delay_ms(15000);
+		_delay_ms(15000); // Thingspeak delay (15s)
 	}
 }
